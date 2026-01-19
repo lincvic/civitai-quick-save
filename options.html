@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Civitai Quick Save - Settings</title>
+  <style>
+    :root {
+      --bg-primary: #0f0f1a;
+      --bg-secondary: #1a1a2e;
+      --bg-tertiary: #252542;
+      --accent: #6366f1;
+      --accent-hover: #818cf8;
+      --text-primary: #e2e8f0;
+      --text-secondary: #94a3b8;
+      --success: #22c55e;
+      --error: #ef4444;
+      --border: rgba(255, 255, 255, 0.1);
+    }
+    
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      padding: 40px;
+      line-height: 1.6;
+    }
+    
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    
+    header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    
+    .logo {
+      width: 64px;
+      height: 64px;
+      margin-bottom: 16px;
+      border-radius: 16px;
+    }
+    
+    h1 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    
+    .subtitle {
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+    
+    .card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+    
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    
+    .card-title {
+      font-size: 18px;
+      font-weight: 600;
+    }
+    
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+    
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-secondary);
+    }
+    
+    .status-dot.connected {
+      background: var(--success);
+    }
+    
+    .status-dot.disconnected {
+      background: var(--error);
+    }
+    
+    .collections-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    
+    .collection-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: var(--bg-tertiary);
+      border-radius: 10px;
+      transition: background 0.15s ease;
+    }
+    
+    .collection-item:hover {
+      background: rgba(99, 102, 241, 0.2);
+    }
+    
+    .collection-name {
+      font-weight: 500;
+    }
+    
+    .collection-count {
+      font-size: 12px;
+      color: var(--text-secondary);
+      background: var(--bg-primary);
+      padding: 4px 10px;
+      border-radius: 20px;
+    }
+    
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-secondary);
+    }
+    
+    .empty-state svg {
+      width: 48px;
+      height: 48px;
+      margin-bottom: 16px;
+      opacity: 0.5;
+    }
+    
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 24px;
+      font-size: 14px;
+      font-weight: 600;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background: var(--accent-hover);
+      transform: translateY(-1px);
+    }
+    
+    .btn-primary:active {
+      transform: translateY(0);
+    }
+    
+    .btn-primary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
+    .btn-secondary {
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+    }
+    
+    .btn-secondary:hover {
+      background: rgba(99, 102, 241, 0.2);
+      border-color: var(--accent);
+    }
+    
+    .actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 20px;
+    }
+    
+    .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    
+    .message {
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 14px;
+      margin-top: 16px;
+      display: none;
+    }
+    
+    .message.visible {
+      display: block;
+    }
+    
+    .message.success {
+      background: rgba(34, 197, 94, 0.2);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      color: var(--success);
+    }
+    
+    .message.error {
+      background: rgba(239, 68, 68, 0.2);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: var(--error);
+    }
+    
+    .help-text {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-top: 16px;
+      line-height: 1.8;
+    }
+    
+    .help-text a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    
+    .help-text a:hover {
+      text-decoration: underline;
+    }
+    
+    footer {
+      text-align: center;
+      margin-top: 40px;
+      color: var(--text-secondary);
+      font-size: 13px;
+    }
+    
+    footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    
+    /* Scrollbar styling */
+    .collections-list::-webkit-scrollbar {
+      width: 6px;
+    }
+    
+    .collections-list::-webkit-scrollbar-track {
+      background: var(--bg-primary);
+      border-radius: 3px;
+    }
+    
+    .collections-list::-webkit-scrollbar-thumb {
+      background: var(--bg-tertiary);
+      border-radius: 3px;
+    }
+    
+    .collections-list::-webkit-scrollbar-thumb:hover {
+      background: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <img src="icons/icon128.png" alt="Logo" class="logo">
+      <h1>Civitai Quick Save</h1>
+      <p class="subtitle">Quickly save images to your collections</p>
+    </header>
+    
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Your Collections</h2>
+        <div class="status">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="statusText">Checking...</span>
+        </div>
+      </div>
+      
+      <div id="collectionsContainer">
+        <div class="empty-state" id="emptyState">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+          </svg>
+          <p>No collections found</p>
+          <p style="font-size: 12px; margin-top: 8px;">Make sure you're logged into Civitai</p>
+        </div>
+        
+        <div class="collections-list" id="collectionsList" style="display: none;"></div>
+      </div>
+      
+      <div class="actions">
+        <button class="btn btn-primary" id="refreshBtn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 4v6h-6M1 20v-6h6"></path>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+          Refresh Collections
+        </button>
+      </div>
+      
+      <div class="message" id="message"></div>
+      
+      <div class="help-text">
+        <p><strong>How to use:</strong></p>
+        <ol style="margin-left: 20px; margin-top: 8px;">
+          <li>Make sure you're logged into <a href="https://civitai.com" target="_blank">civitai.com</a></li>
+          <li>Click "Refresh Collections" to load your collections</li>
+          <li>Browse Civitai - save buttons will appear on images</li>
+          <li>Click any collection button to save instantly</li>
+        </ol>
+      </div>
+    </div>
+    
+    <footer>
+      <p>Civitai Quick Save Collection v1.0.0</p>
+      <p style="margin-top: 4px;">
+        <a href="https://civitai.com" target="_blank">Visit Civitai</a>
+      </p>
+    </footer>
+  </div>
+  
+  <script src="options.js"></script>
+</body>
+</html>
