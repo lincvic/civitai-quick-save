@@ -1,15 +1,16 @@
 # Civitai Quick Save Collection
 
-A Chrome extension that adds quick save buttons to all images, videos, and posts on [civitai.com](https://civitai.com), allowing you to instantly save items to your collections.
+A Chrome extension that adds quick save buttons to all images, videos, and posts on [civitai.com](https://civitai.com) and [civitai.red](https://civitai.red), allowing you to instantly save items to your collections.
 
 ## Features
 
-- **Quick Save Buttons**: Adds save buttons to every image, video, and post on Civitai
+- **Quick Save Buttons**: Adds save buttons to every image, video, and post on supported Civitai domains
 - **Multiple Collections**: Shows a button for each of your collections
 - **Instant Save**: One-click saving without navigating away from the page
 - **Visual Feedback**: Clear success/error notifications
 - **Auto-Detection**: Automatically detects new content loaded via infinite scroll
 - **Dark Theme**: Styled to match Civitai's dark interface
+- **Multi-Domain Support**: Works on both `civitai.com` and `civitai.red`
 
 ## Installation
 
@@ -24,14 +25,14 @@ A Chrome extension that adds quick save buttons to all images, videos, and posts
 
 ## Usage
 
-1. **Login to Civitai**: Make sure you're logged into [civitai.com](https://civitai.com)
+1. **Login to Civitai**: Make sure you're logged into [civitai.com](https://civitai.com) or [civitai.red](https://civitai.red)
 
 2. **Refresh Collections**: 
    - Click the extension icon or go to extension options
    - Click "Refresh Collections" to load your collections
 
 3. **Browse & Save**:
-   - Navigate to any page on Civitai with images
+   - Navigate to any page on Civitai with images on either supported domain
    - Hover over any image/post to see the save buttons
    - Click a collection button to save instantly
 
@@ -70,16 +71,16 @@ Access the options page by:
 
 ### Buttons not appearing
 
-1. Make sure you're on `civitai.com`
+1. Make sure you're on `civitai.com` or `civitai.red`
 2. Try refreshing the page
 3. Check that you're logged in
 4. Open the extension options and click "Refresh Collections"
 
 ### "Not logged in" error
 
-1. Navigate to [civitai.com](https://civitai.com) and log in
-2. Refresh the extension options page
-3. Click "Refresh Collections"
+1. Navigate to [civitai.com](https://civitai.com) or [civitai.red](https://civitai.red) and log in
+2. If you reloaded or updated the extension, reload the open Civitai tab too
+3. Refresh the extension options page and click "Refresh Collections"
 
 ### API errors
 
@@ -90,11 +91,14 @@ Civitai's internal API may change. See [API_DISCOVERY.md](API_DISCOVERY.md) for 
 ```
 civitai-quick-save-collection/
 ├── manifest.json      # Extension configuration
+├── domain-config.js   # Shared supported-domain and origin-resolution helpers
 ├── background.js      # Service worker for API calls
 ├── content.js         # DOM manipulation and button injection
 ├── styles.css         # Button and toast styling
 ├── options.html       # Settings page HTML
 ├── options.js         # Settings page logic
+├── tests/             # Node.js unit tests
+│   └── domain-config.test.js
 ├── icons/             # Extension icons
 │   ├── icon16.png
 │   ├── icon48.png
@@ -109,7 +113,7 @@ This extension requires the following permissions:
 
 - **storage**: Store collections cache and settings
 - **activeTab**: Access the current tab when clicked
-- **host_permissions (civitai.com)**: Interact with Civitai pages
+- **host_permissions (`civitai.com`, `civitai.red`)**: Interact with supported Civitai pages
 
 ## Development
 
@@ -118,7 +122,7 @@ This extension requires the following permissions:
 1. Make changes to the source files
 2. Go to `chrome://extensions/`
 3. Click the refresh icon on the extension card
-4. Reload the Civitai page to see changes
+4. Reload the Civitai page on either supported domain to see changes
 
 ### Key Files to Modify
 

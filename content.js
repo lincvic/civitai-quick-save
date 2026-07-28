@@ -3,6 +3,40 @@
 // Store collections data
 let collections = [];
 let isInitialized = false;
+const API_PROXY_ACTION = 'cqsApiRequest';
+const ALLOWED_API_METHODS = new Set(['GET', 'POST']);
+
+async function proxyCivitaiApiRequest(request) {
+  const method = String(request?.method || 'GET').toUpperCase();
+  const url = new URL(request?.path || '', window.location.origin);
+
+  if (
+    url.origin !== window.location.origin ||
+    !url.pathname.startsWith('/api/trpc/collection.') ||
+    !ALLOWED_API_METHODS.has(method)
+  ) {
+    throw new Error('Blocked unsupported Civitai API request.');
+  }
+
+  const options = {
+    method,
+    credentials: 'include',
+    headers: request.headers || {}
+  };
+
+  if (method !== 'GET' && request.body !== undefined) {
+    options.body = request.body;
+  }
+
+  const response = await fetch(`${url.pathname}${url.search}`, options);
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    body: await response.text()
+  };
+}
 
 // More specific selectors for Civitai image/post cards
 // These target the actual content cards, not generic containers
@@ -328,6 +362,13 @@ function startObserver() {
 
 // Listen for messages from background/popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === API_PROXY_ACTION) {
+    proxyCivitaiApiRequest(message.request)
+      .then((response) => sendResponse({ success: true, response }))
+      .catch((error) => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
   if (message.action === 'collectionsUpdated') {
     collections = message.collections || [];
     // Re-inject buttons with new collections
@@ -335,6 +376,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     processedItems.clear();
     injectButtonsToExistingItems();
     sendResponse({ success: true });
+    return false;
   }
   
   if (message.action === 'toggleVisibility') {
@@ -343,6 +385,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       container.classList.toggle('cqs-hidden', !message.visible);
     });
     sendResponse({ success: true });
+    return false;
   }
 });
 

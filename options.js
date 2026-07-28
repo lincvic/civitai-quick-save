@@ -1,6 +1,9 @@
 // Civitai Quick Save Collection - Options Page Script
 
 document.addEventListener('DOMContentLoaded', () => {
+  const domainConfig = globalThis.CivitaiDomainConfig || {
+    SUPPORTED_CIVITAI_MATCH_PATTERNS: ['https://civitai.com/*', 'https://civitai.red/*']
+  };
   const statusDot = document.getElementById('statusDot');
   const statusText = document.getElementById('statusText');
   const emptyState = document.getElementById('emptyState');
@@ -123,7 +126,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Notify content scripts about collection updates
   async function notifyContentScripts(collections) {
     try {
-      const tabs = await chrome.tabs.query({ url: 'https://civitai.com/*' });
+      const tabs = await chrome.tabs.query({
+        url: domainConfig.SUPPORTED_CIVITAI_MATCH_PATTERNS
+      });
       for (const tab of tabs) {
         try {
           await chrome.tabs.sendMessage(tab.id, {

@@ -8,14 +8,15 @@
     "activeTab"
   ],
   "host_permissions": [
-    "https://civitai.com/*"
+    "https://civitai.com/*",
+    "https://civitai.red/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["https://civitai.com/*"],
+      "matches": ["https://civitai.com/*", "https://civitai.red/*"],
       "js": ["content.js"],
       "css": ["styles.css"],
       "run_at": "document_idle"

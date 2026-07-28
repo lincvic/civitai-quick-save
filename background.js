@@ -1,13 +1,22 @@
 // Civitai Quick Save Collection - Background Service Worker
 
-const CIVITAI_BASE_URL = 'https://civitai.com';
+importScripts('domain-config.js');
+
+const {
+  DEFAULT_CIVITAI_ORIGIN,
+  SUPPORTED_CIVITAI_MATCH_PATTERNS,
+  normalizeSupportedOrigin,
+  resolvePreferredOrigin,
+} = globalThis.CivitaiDomainConfig;
+
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes cache
+const API_PROXY_ACTION = 'cqsApiRequest';
+const LAST_USED_ORIGIN_KEY = 'lastUsedApiOrigin';
+const COLLECTIONS_BY_ORIGIN_KEY = 'collectionsByOrigin';
+const COLLECTIONS_TIMESTAMPS_BY_ORIGIN_KEY = 'collectionsTimestampsByOrigin';
 
 // Store for collections cache
-let collectionsCache = {
-  data: null,
-  timestamp: 0
-};
+let collectionsCache = {};
 
 // Initialize extension
 chrome.runtime.onInstalled.addListener(() => {
@@ -17,28 +26,155 @@ chrome.runtime.onInstalled.addListener(() => {
 // Listen for messages from content script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'getCollections') {
-    handleGetCollections(sendResponse);
+    handleGetCollections(sender, sendResponse);
     return true; // Keep channel open for async response
   }
   
   if (message.action === 'saveToCollection') {
-    handleSaveToCollection(message, sendResponse);
+    handleSaveToCollection(message, sender, sendResponse);
     return true; // Keep channel open for async response
   }
   
   if (message.action === 'refreshCollections') {
-    handleRefreshCollections(sendResponse);
+    handleRefreshCollections(sender, sendResponse);
     return true;
   }
   
   if (message.action === 'removeFromCollection') {
-    handleRemoveFromCollection(message, sendResponse);
+    handleRemoveFromCollection(message, sender, sendResponse);
     return true;
   }
 });
 
+function getCacheEntry(origin) {
+  return collectionsCache[origin] || null;
+}
+
+function setCacheEntry(origin, collections, timestamp) {
+  collectionsCache[origin] = {
+    data: collections,
+    timestamp
+  };
+}
+
+async function persistLastUsedOrigin(origin) {
+  if (!origin) {
+    return;
+  }
+
+  await chrome.storage.local.set({ [LAST_USED_ORIGIN_KEY]: origin });
+}
+
+async function resolveApiContext(sender) {
+  const [activeTabs, openTabs, stored] = await Promise.all([
+    chrome.tabs.query({
+      active: true,
+      lastFocusedWindow: true,
+      url: SUPPORTED_CIVITAI_MATCH_PATTERNS
+    }),
+    chrome.tabs.query({
+      url: SUPPORTED_CIVITAI_MATCH_PATTERNS
+    }),
+    chrome.storage.local.get([LAST_USED_ORIGIN_KEY])
+  ]);
+
+  const origin = resolvePreferredOrigin({
+    senderUrl: sender?.tab?.url || sender?.url || null,
+    activeTabUrls: activeTabs.map((tab) => tab.url).filter(Boolean),
+    openTabUrls: openTabs.map((tab) => tab.url).filter(Boolean),
+    storedOrigin: stored[LAST_USED_ORIGIN_KEY],
+    fallbackOrigin: DEFAULT_CIVITAI_ORIGIN
+  });
+
+  const matchingTab = [sender?.tab, ...activeTabs, ...openTabs].find((tab) =>
+    Number.isInteger(tab?.id) && normalizeSupportedOrigin(tab.url) === origin
+  );
+
+  await persistLastUsedOrigin(origin);
+  return {
+    origin,
+    tabId: matchingTab?.id ?? null
+  };
+}
+
+async function requestCivitaiApi(apiContext, path, options = {}) {
+  if (!path.startsWith('/api/trpc/collection.')) {
+    throw new Error('Blocked unsupported Civitai API path.');
+  }
+
+  let proxyError = null;
+
+  if (apiContext.tabId !== null) {
+    try {
+      const proxyResult = await chrome.tabs.sendMessage(apiContext.tabId, {
+        action: API_PROXY_ACTION,
+        request: {
+          path,
+          method: options.method || 'GET',
+          headers: options.headers || {},
+          body: options.body
+        }
+      });
+
+      if (!proxyResult?.success || !proxyResult.response) {
+        throw new Error(proxyResult?.error || 'The Civitai tab did not return a response.');
+      }
+
+      return {
+        ...proxyResult.response,
+        transport: 'site-tab'
+      };
+    } catch (error) {
+      proxyError = error;
+      console.warn(
+        `Civitai API tab proxy unavailable for ${apiContext.origin}; falling back to the service worker.`,
+        error
+      );
+    }
+  }
+
+  const response = await fetch(`${apiContext.origin}${path}`, {
+    ...options,
+    credentials: 'include'
+  });
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    body: await response.text(),
+    transport: 'service-worker',
+    proxyError: proxyError?.message || null
+  };
+}
+
+function parseApiJson(response, operation) {
+  try {
+    return response.body ? JSON.parse(response.body) : null;
+  } catch (error) {
+    throw new Error(`${operation} returned an invalid response.`);
+  }
+}
+
+function createApiError(operation, response, apiContext) {
+  if (response.status === 401) {
+    if (response.transport === 'service-worker') {
+      return new Error(
+        `Civitai could not access your ${apiContext.origin} session. ` +
+        'Open or reload that site in a tab, then try again.'
+      );
+    }
+
+    return new Error(
+      `Your session on ${apiContext.origin} was rejected. Reload the site or sign in again.`
+    );
+  }
+
+  return new Error(`${operation} failed: ${response.status}`);
+}
+
 // Fetch user's collections from Civitai
-async function fetchCollections() {
+async function fetchCollections(apiContext) {
   try {
     // The endpoint is collection.getAllUser - a protected procedure
     // It requires the user to be logged in (session cookie)
@@ -49,11 +185,13 @@ async function fetchCollections() {
       }
     };
     
-    const collectionsResponse = await fetch(
-      `${CIVITAI_BASE_URL}/api/trpc/collection.getAllUser?input=${encodeURIComponent(JSON.stringify(input))}`,
+    const path =
+      `/api/trpc/collection.getAllUser?input=${encodeURIComponent(JSON.stringify(input))}`;
+    const collectionsResponse = await requestCivitaiApi(
+      apiContext,
+      path,
       {
         method: 'GET',
-        credentials: 'include',
         headers: {
           'Accept': 'application/json',
         }
@@ -61,16 +199,16 @@ async function fetchCollections() {
     );
     
     if (!collectionsResponse.ok) {
-      const errorText = await collectionsResponse.text();
-      console.error('Collections API error:', collectionsResponse.status, errorText);
+      console.error(
+        'Collections API error:',
+        collectionsResponse.status,
+        collectionsResponse.body
+      );
       
-      if (collectionsResponse.status === 401) {
-        throw new Error('Not logged in. Please log in to Civitai first.');
-      }
-      throw new Error(`Failed to fetch collections: ${collectionsResponse.status}`);
+      throw createApiError('Fetching collections', collectionsResponse, apiContext);
     }
     
-    const collectionsData = await collectionsResponse.json();
+    const collectionsData = parseApiJson(collectionsResponse, 'Fetching collections');
     return parseCollectionsResponse(collectionsData);
     
   } catch (error) {
@@ -123,35 +261,52 @@ function parseCollectionsResponse(data) {
 }
 
 // Handle get collections request
-async function handleGetCollections(sendResponse) {
+async function handleGetCollections(sender, sendResponse) {
   try {
+    const apiContext = await resolveApiContext(sender);
+    const apiBaseUrl = apiContext.origin;
+
     // Check cache first
     const now = Date.now();
-    if (collectionsCache.data && (now - collectionsCache.timestamp) < CACHE_DURATION) {
-      sendResponse({ success: true, collections: collectionsCache.data });
+    const cacheEntry = getCacheEntry(apiBaseUrl);
+    if (cacheEntry && (now - cacheEntry.timestamp) < CACHE_DURATION) {
+      sendResponse({ success: true, collections: cacheEntry.data });
       return;
     }
     
     // Also check storage for persisted cache
-    const stored = await chrome.storage.local.get(['collections', 'collectionsTimestamp']);
-    if (stored.collections && stored.collectionsTimestamp && (now - stored.collectionsTimestamp) < CACHE_DURATION) {
-      collectionsCache.data = stored.collections;
-      collectionsCache.timestamp = stored.collectionsTimestamp;
-      sendResponse({ success: true, collections: stored.collections });
+    const stored = await chrome.storage.local.get([
+      COLLECTIONS_BY_ORIGIN_KEY,
+      COLLECTIONS_TIMESTAMPS_BY_ORIGIN_KEY
+    ]);
+    const storedCollections = stored[COLLECTIONS_BY_ORIGIN_KEY]?.[apiBaseUrl];
+    const storedTimestamp = stored[COLLECTIONS_TIMESTAMPS_BY_ORIGIN_KEY]?.[apiBaseUrl];
+
+    if (storedCollections && storedTimestamp && (now - storedTimestamp) < CACHE_DURATION) {
+      setCacheEntry(apiBaseUrl, storedCollections, storedTimestamp);
+      sendResponse({ success: true, collections: storedCollections });
       return;
     }
     
     // Fetch fresh collections
-    const collections = await fetchCollections();
+    const collections = await fetchCollections(apiContext);
     
     // Update cache
-    collectionsCache.data = collections;
-    collectionsCache.timestamp = now;
+    setCacheEntry(apiBaseUrl, collections, now);
     
     // Persist to storage
+    const collectionsByOrigin = {
+      ...(stored[COLLECTIONS_BY_ORIGIN_KEY] || {}),
+      [apiBaseUrl]: collections
+    };
+    const collectionsTimestampsByOrigin = {
+      ...(stored[COLLECTIONS_TIMESTAMPS_BY_ORIGIN_KEY] || {}),
+      [apiBaseUrl]: now
+    };
+
     await chrome.storage.local.set({
-      collections: collections,
-      collectionsTimestamp: now
+      [COLLECTIONS_BY_ORIGIN_KEY]: collectionsByOrigin,
+      [COLLECTIONS_TIMESTAMPS_BY_ORIGIN_KEY]: collectionsTimestampsByOrigin
     });
     
     sendResponse({ success: true, collections });
@@ -162,25 +317,37 @@ async function handleGetCollections(sendResponse) {
 }
 
 // Handle refresh collections request
-async function handleRefreshCollections(sendResponse) {
+async function handleRefreshCollections(sender, sendResponse) {
   try {
-    // Clear cache
-    collectionsCache.data = null;
-    collectionsCache.timestamp = 0;
-    await chrome.storage.local.remove(['collections', 'collectionsTimestamp']);
+    const apiContext = await resolveApiContext(sender);
+    const apiBaseUrl = apiContext.origin;
+
+    delete collectionsCache[apiBaseUrl];
     
     // Fetch fresh collections
-    const collections = await fetchCollections();
+    const collections = await fetchCollections(apiContext);
     
     // Update cache
     const now = Date.now();
-    collectionsCache.data = collections;
-    collectionsCache.timestamp = now;
+    setCacheEntry(apiBaseUrl, collections, now);
     
     // Persist to storage
+    const stored = await chrome.storage.local.get([
+      COLLECTIONS_BY_ORIGIN_KEY,
+      COLLECTIONS_TIMESTAMPS_BY_ORIGIN_KEY
+    ]);
+    const collectionsByOrigin = {
+      ...(stored[COLLECTIONS_BY_ORIGIN_KEY] || {}),
+      [apiBaseUrl]: collections
+    };
+    const collectionsTimestampsByOrigin = {
+      ...(stored[COLLECTIONS_TIMESTAMPS_BY_ORIGIN_KEY] || {}),
+      [apiBaseUrl]: now
+    };
+
     await chrome.storage.local.set({
-      collections: collections,
-      collectionsTimestamp: now
+      [COLLECTIONS_BY_ORIGIN_KEY]: collectionsByOrigin,
+      [COLLECTIONS_TIMESTAMPS_BY_ORIGIN_KEY]: collectionsTimestampsByOrigin
     });
     
     sendResponse({ success: true, collections });
@@ -191,10 +358,12 @@ async function handleRefreshCollections(sendResponse) {
 }
 
 // Handle save to collection request
-async function handleSaveToCollection(message, sendResponse) {
+async function handleSaveToCollection(message, sender, sendResponse) {
   const { collectionId, itemId, itemType } = message;
   
   try {
+    const apiContext = await resolveApiContext(sender);
+
     // The endpoint is collection.saveItem
     // Input schema: saveCollectionItemInputSchema
     // Requires one of: articleId, postId, modelId, imageId
@@ -228,9 +397,8 @@ async function handleSaveToCollection(message, sendResponse) {
         input.json.imageId = itemIdNum;
     }
     
-    const response = await fetch(`${CIVITAI_BASE_URL}/api/trpc/collection.saveItem`, {
+    const response = await requestCivitaiApi(apiContext, '/api/trpc/collection.saveItem', {
       method: 'POST',
-      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
@@ -239,16 +407,12 @@ async function handleSaveToCollection(message, sendResponse) {
     });
     
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Save item API error:', response.status, errorText);
+      console.error('Save item API error:', response.status, response.body);
       
-      if (response.status === 401) {
-        throw new Error('Not logged in. Please log in to Civitai first.');
-      }
-      throw new Error(`Failed to save: ${response.status}`);
+      throw createApiError('Saving item', response, apiContext);
     }
     
-    const result = await response.json();
+    const result = parseApiJson(response, 'Saving item');
     sendResponse({ success: true, result });
     
   } catch (error) {
@@ -258,10 +422,12 @@ async function handleSaveToCollection(message, sendResponse) {
 }
 
 // Handle remove from collection request
-async function handleRemoveFromCollection(message, sendResponse) {
+async function handleRemoveFromCollection(message, sender, sendResponse) {
   const { collectionId, itemId } = message;
   
   try {
+    const apiContext = await resolveApiContext(sender);
+
     // The endpoint is collection.removeFromCollection
     // Input schema: removeCollectionItemInput = { collectionId, itemId }
     const input = {
@@ -271,23 +437,25 @@ async function handleRemoveFromCollection(message, sendResponse) {
       }
     };
     
-    const response = await fetch(`${CIVITAI_BASE_URL}/api/trpc/collection.removeFromCollection`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify(input)
-    });
+    const response = await requestCivitaiApi(
+      apiContext,
+      '/api/trpc/collection.removeFromCollection',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify(input)
+      }
+    );
     
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Remove item API error:', response.status, errorText);
-      throw new Error(`Failed to remove: ${response.status}`);
+      console.error('Remove item API error:', response.status, response.body);
+      throw createApiError('Removing item', response, apiContext);
     }
     
-    const result = await response.json();
+    const result = parseApiJson(response, 'Removing item');
     sendResponse({ success: true, result });
     
   } catch (error) {
